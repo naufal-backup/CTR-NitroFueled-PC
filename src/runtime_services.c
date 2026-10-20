@@ -354,7 +354,7 @@ static int trophy_trp(int id, unsigned char **png, uint64_t *png_size) {
     if (fd<0) return -1;
     unsigned char header[0x60];
     int count=-1;
-    char want[16]="";
+    char want[32]="";
     if (id>=0) snprintf(want,sizeof(want),"TROP%03d.PNG",id);
     if (runtime_file_read(fd,header,sizeof(header))==sizeof(header) && header[0]==0xDC && header[1]==0xA2) {
         const uint32_t entries=(uint32_t)header[16]<<24|header[17]<<16|header[18]<<8|header[19];

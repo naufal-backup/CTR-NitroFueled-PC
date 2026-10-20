@@ -225,6 +225,7 @@ static int dw_swap_at(uintptr_t addr) {
  * task+0x9c==0x10000 and task+0xe4==2 dumps the crypto-relevant task state
  * (+0x100/+0x252/+0x264/+0x26c/+0x288../+0x360/+0x600/+0x700), ending all
  * speculation about what the lobby crypto needs. Slow (one full scan), once. */
+#ifdef _WIN32
 static void dw_dump_field(const char *name, const unsigned char *base, uint64_t off, uint64_t len) {
     unsigned char buf[64];
     if (len > sizeof buf) len = sizeof buf;
@@ -234,7 +235,6 @@ static void dw_dump_field(const char *name, const unsigned char *base, uint64_t 
     hex[len * 2] = 0;
     printf("Net: online: task+0x%llx %s = %s\n", (unsigned long long)off, name, hex);
 }
-#ifdef _WIN32
 /* Whole-process scan (dev only): every committed readable region is searched for
  * the 8-byte hello nonce; each hit verified as a lobby task (+0x9c==0x10000 and
  * +0xe4==2) before dumping crypto-relevant state. Faults resume below. */
