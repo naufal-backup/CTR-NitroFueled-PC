@@ -1,0 +1,98 @@
+name: Release (Linux)
+
+# Linux build of the port: the AppImage the project's own packaging produces
+# (build.sh -> packaging/appimage.sh), with the launcher, Mesa's Vulkan drivers
+# and their Nix closure bundled.
+#
+# Runs:
+#   - manually (workflow_dispatch): builds the selected branch and keeps the
+#     package as a workflow artifact;
+#   - on a v* tag: builds it and publishes a GitHub release with the AppImage,
+#     its checksum and the source archive of the tag.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-linux-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  appimage:
+    name: Linux AppImage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+
+      # Nix provides the build environment of shell.nix (GCC, CMake, Ninja,
+      # Vulkan, SDL3, FFmpeg, glslang, ...) and, later, the closure that
+      # packaging/appimage.sh bundles into the AppImage.
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Build (sacredfire + libbbgpu.so)
+        run: nix-shell shell.nix --run 'BB_IN_NIX_SHELL=1 bash build.sh'
+
+      - name: Package AppImage
+        run: bash packaging/appimage.sh
+
+      - name: Name, checksum and source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(git describe --tags --match 'v*' --always)
+          asset="CTR-NitroFueled-PC-${version}-linux-x86_64.AppImage"
+          mv dist/SacredFire-x86_64.AppImage "dist/$asset"
+          mv dist/SacredFire-x86_64.AppImage.sha256 "dist/$asset.sha256" 2>/dev/null || true
+          mv dist/SacredFire-x86_64.AppImage.build.txt "dist/$asset.build.txt"
+          (cd dist && sha256sum "$asset" > "$asset.sha256" && sha256sum --check "$asset.sha256")
+          # GPL: the source of the binary is the repository at this revision.
+          git archive --format=tar.gz --prefix="CTR-NitroFueled-PC-${version}/" \
+            -o "dist/CTR-NitroFueled-PC-${version}-source.tar.gz" HEAD
+          echo "ASSET=$asset" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-appimage
+          path: |
+            dist/*.AppImage
+            dist/*.AppImage.sha256
+            dist/*.AppImage.build.txt
+            dist/*-source.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          files=(dist/*.AppImage dist/*.AppImage.sha256 dist/*.AppImage.build.txt dist/*-source.tar.gz)
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${files[@]}" --clobber
+          else
+            gh release create "$tag" "${files[@]}" --verify-tag \
+              --title "CTR Nitro-Fueled PC ${tag} (Linux)" \
+              --generate-notes
+          fi
